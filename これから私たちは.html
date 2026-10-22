@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>これから私たちは - 今日の行動決定アプリ</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            background-color: #f8fafc;
+        }
+        
+        /* 3D Card Flip Animation Styles */
+        .perspective-1000 {
+            perspective: 1000px;
+        }
+        .transform-style-3d {
+            transform-style: preserve-3d;
+        }
+        .backface-hidden {
+            backface-visibility: hidden;
+        }
+        .rotate-y-180 {
+            transform: rotateY(180deg);
+        }
+        
+        .card-inner {
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .card-inner.is-flipped {
+            transform: rotateY(180deg);
+        }
+
+        /* Confetti / Sparkle animations */
+        @keyframes pulse-subtle {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+        }
+        .animate-pulse-subtle {
+            animation: pulse-subtle 2s infinite ease-in-out;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+    <div id="app" class="flex-1 flex flex-col max-w-2xl mx-auto w-full px-4 py-6">
+        
+        <!-- Header -->
+        <header class="text-center mb-6">
+            <div class="inline-block bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-500 text-white px-4 py-1 rounded-full text-xs font-bold tracking-wider mb-2 shadow-sm">
+                BOARD GAME STYLE DECISION MAKER
+            </div>
+            <h1 class="text-3xl sm:text-4xl font-black text-slate-800 tracking-tight flex items-center justify-center gap-2">
+                <i class="fa-solid fa-dice-d20 text-rose-500"></i>
+                これから私たちは
+            </h1>
+            <p class="text-xs sm:text-sm text-slate-500 mt-1 font-medium">カードを引いて、今日やることを決めよう！</p>
+            
+            <!-- Progress Bar -->
+            <div class="mt-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3">
+                <div class="text-xs font-bold text-slate-600 shrink-0">
+                    制覇率 <span class="text-rose-500 text-sm font-extrabold">{{ completionPercentage }}%</span>
+                </div>
+                <div class="flex-1 bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                    <div class="bg-gradient-to-r from-amber-400 to-rose-500 h-full transition-all duration-500" :style="{ width: completionPercentage + '%' }"></div>
+                </div>
+                <div class="text-xs font-medium text-slate-400 shrink-0">
+                    {{ completedCount }} / {{ items.length }}
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="flex bg-slate-200/80 p-1 rounded-xl mb-6 font-bold text-sm">
+            <button 
+                @click="currentTab = 'draw'" 
+                :class="currentTab === 'draw' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+                class="flex-1 py-2.5 rounded-lg transition-all duration-200 flex items-center justify-center gap-2">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                カードを引く
+            </button>
+            <button 
+                @click="currentTab = 'list'" 
+                :class="currentTab === 'list' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+                class="flex-1 py-2.5 rounded-lg transition-all duration-200 flex items-center justify-center gap-2">
+                <i class="fa-solid fa-list-check"></i>
+                一覧・管理 ({{ items.length }})
+            </button>
+        </div>
+
+        <!-- TAB 1: CARD DRAW VIEW -->
+        <main v-if="currentTab === 'draw'" class="flex-1 flex flex-col items-center justify-center my-auto">
+            
+            <!-- Category Filter Selector -->
+            <div class="w-full mb-6">
+                <label class="block text-xs font-bold text-slate-500 mb-1 text-center">引きたいカテゴリーを選択</label>
+                <select v-model="selectedCategory" class="w-full bg-white border border-slate-200 text-slate-700 text-sm rounded-xl px-3 py-2.5 font-bold shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 transition-all text-center">
+                    <option value="ALL">✨ すべてのカテゴリーから引く</option>
+                    <option value="ONLY_UNCOMPLETED">🔒 未完了の項目からのみ引く (残り {{ uncompletedItems.length }}件)</option>
+                    <option disabled>──────────</option>
+                    <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                        {{ cat.icon }} {{ cat.name }} ({{ getCategoryItems(cat.id).length }})
+                    </option>
+                </select>
+            </div>
+
+            <!-- The Card Container -->
+            <div class="w-full max-w-sm aspect-[3/4] perspective-1000 my-2 cursor-pointer group" @click="handleCardClick">
+                <div class="card-inner w-full h-full relative rounded-3xl shadow-xl transform-style-3d transition-transform duration-500" :class="{ 'is-flipped': isFlipped }">
+                    
+                    <!-- Card Back (Initial State) -->
+                    <div class="absolute inset-0 w-full h-full rounded-3xl bg-gradient-to-br from-rose-500 via-pink-500 to-indigo-600 p-6 flex flex-col justify-between text-white backface-hidden border-4 border-white/30 shadow-2xl overflow-hidden group-hover:scale-[1.02] transition-transform">
+                        <!-- Decorative background pattern -->
+                        <div class="absolute -right-8 -bottom-8 text-white/10 text-9xl">
+                            <i class="fa-solid fa-dice-d20"></i>
+                        </div>
+                        <div class="absolute -left-8 -top-8 text-white/10 text-8xl">
+                            <i class="fa-solid fa-sparkles"></i>
+                        </div>
+
+                        <div class="flex justify-between items-center z-10">
+                            <span class="text-xs font-bold tracking-widest uppercase bg-white/20 px-3 py-1 rounded-full backdrop-blur-md">これから私たちは</span>
+                            <i class="fa-solid fa-crown text-amber-300 text-lg"></i>
+                        </div>
+
+                        <div class="text-center my-auto z-10 animate-pulse-subtle">
+                            <div class="w-20 h-20 mx-auto bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-4 border border-white/30 shadow-inner">
+                                <i class="fa-solid fa-hand-pointer text-3xl text-white"></i>
+                            </div>
+                            <p class="text-2xl font-black tracking-wide">タップして<br>カードをめくる</p>
+                            <p class="text-xs text-white/80 mt-2 font-medium">何が出るかはお楽しみ！</p>
+                        </div>
+
+                        <div class="text-center z-10">
+                            <span class="text-xs text-white/70 font-bold">DRAW A CARD</span>
+                        </div>
+                    </div>
+
+                    <!-- Card Front (Drawn Content) -->
+                    <div class="absolute inset-0 w-full h-full rounded-3xl bg-white p-6 flex flex-col justify-between text-slate-800 backface-hidden rotate-y-180 border-4 border-rose-100 shadow-2xl overflow-hidden">
+                        
+                        <!-- Top Info -->
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <span class="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full" :class="getCategoryBadgeClass(currentCard?.category)">
+                                <span>{{ getCategoryIcon(currentCard?.category) }}</span>
+                                <span>{{ getCategoryName(currentCard?.category) }}</span>
+                            </span>
+                            <span class="text-xs font-bold text-slate-400">#{{ currentCard?.id }}</span>
+                        </div>
+
+                        <!-- Card Main Text -->
+                        <div class="my-auto text-center px-2">
+                            <p class="text-xl sm:text-2xl font-black text-slate-800 leading-relaxed break-words">
+                                {{ currentCard?.title }}
+                            </p>
+                        </div>
+
+                        <!-- Card Actions & Status -->
+                        <div class="space-y-3 pt-3 border-t border-slate-100">
+                            <button 
+                                @click.stop="toggleItemComplete(currentCard)" 
+                                :class="currentCard?.completed ? 'bg-emerald-500 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'"
+                                class="w-full py-3 rounded-2xl font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 shadow-sm">
+                                <i class="fa-solid" :class="currentCard?.completed ? 'fa-circle-check' : 'fa-circle'"></i>
+                                {{ currentCard?.completed ? 'やった！（実施済み）' : '実施済みにする' }}
+                            </button>
+                            
+                            <p class="text-xs text-center text-slate-400 font-medium">
+                                タップでもう一度別のカードを引く
+                            </p>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Draw Button Below Card -->
+            <button 
+                @click="drawCard" 
+                class="mt-6 w-full max-w-sm bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white font-black py-4 px-6 rounded-2xl shadow-lg shadow-rose-200 hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all duration-200 flex items-center justify-center gap-2 text-base">
+                <i class="fa-solid fa-dice"></i>
+                もう一度カードを引く
+            </button>
+
+        </main>
+
+        <!-- TAB 2: ITEM LIST & MANAGEMENT -->
+        <main v-if="currentTab === 'list'" class="flex-1 flex flex-col">
+            
+            <!-- Add New Item Form -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                <h2 class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                    <i class="fa-solid fa-plus-circle text-rose-500"></i>
+                    新しいお題を追加する
+                </h2>
+                <form @submit.prevent="addNewItem" class="space-y-3">
+                    <input 
+                        type="text" 
+                        v-model="newItemTitle" 
+                        placeholder="例: 夜の海を見に行く" 
+                        required
+                        class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-rose-400 transition-all">
+                    <div class="flex gap-2">
+                        <select v-model="newItemCategory" class="flex-1 bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-2 font-bold focus:outline-none focus:ring-2 focus:ring-rose-400">
+                            <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                                {{ cat.icon }} {{ cat.name }}
+                            </option>
+                        </select>
+                        <button type="submit" class="bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all shrink-0">
+                            追加
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Filters and Search -->
+            <div class="flex flex-col sm:flex-row gap-2 mb-4">
+                <!-- Search Box -->
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                    <input 
+                        type="text" 
+                        v-model="searchQuery" 
+                        placeholder="キーワードで検索..." 
+                        class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-rose-400 shadow-sm">
+                </div>
+                <!-- Status Filter -->
+                <select v-model="statusFilter" class="bg-white border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-2 font-bold focus:outline-none focus:ring-2 focus:ring-rose-400 shadow-sm">
+                    <option value="ALL">すべて表示</option>
+                    <option value="UNCOMPLETED">未実施のみ</option>
+                    <option value="COMPLETED">実施済みのみ</option>
+                </select>
+            </div>
+
+            <!-- Category Filter Horizontal Scroll -->
+            <div class="flex gap-1.5 overflow-x-auto pb-2 mb-3 no-scrollbar">
+                <button 
+                    @click="listCategoryFilter = 'ALL'"
+                    :class="listCategoryFilter === 'ALL' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'"
+                    class="px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap shadow-sm border border-slate-100 transition-all">
+                    すべて ({{ items.length }})
+                </button>
+                <button 
+                    v-for="cat in categories" 
+                    :key="cat.id" 
+                    @click="listCategoryFilter = cat.id"
+                    :class="listCategoryFilter === cat.id ? 'bg-rose-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'"
+                    class="px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap shadow-sm border border-slate-100 transition-all flex items-center gap-1">
+                    <span>{{ cat.icon }}</span>
+                    <span>{{ cat.name }}</span>
+                </button>
+            </div>
+
+            <!-- Items List -->
+            <div class="flex-1 space-y-2 overflow-y-auto max-h-[450px] pr-1">
+                <div v-if="filteredItems.length === 0" class="text-center py-10 bg-white rounded-2xl border border-dashed border-slate-200">
+                    <p class="text-sm font-bold text-slate-400">該当する項目が見つかりませんでした。</p>
+                </div>
+
+                <div 
+                    v-for="item in filteredItems" 
+                    :key="item.id"
+                    :class="item.completed ? 'bg-slate-50 border-slate-200' : 'bg-white border-slate-100'"
+                    class="p-3.5 rounded-2xl border shadow-sm transition-all flex items-center justify-between gap-3 group hover:border-rose-200">
+                    
+                    <div class="flex items-center gap-3 flex-1 min-w-0">
+                        <button 
+                            @click="toggleItemComplete(item)" 
+                            :class="item.completed ? 'text-emerald-500' : 'text-slate-300 hover:text-slate-400'"
+                            class="text-xl transition-colors shrink-0">
+                            <i class="fa-solid" :class="item.completed ? 'fa-circle-check' : 'fa-circle'"></i>
+                        </button>
+                        
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 mb-0.5">
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-md" :class="getCategoryBadgeClass(item.category)">
+                                    {{ getCategoryName(item.category) }}
+                                </span>
+                            </div>
+                            <p :class="{ 'line-through text-slate-400': item.completed, 'text-slate-800': !item.completed }" class="text-sm font-bold truncate">
+                                {{ item.title }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <button 
+                        @click="deleteItem(item.id)" 
+                        title="削除"
+                        class="text-slate-300 hover:text-rose-500 text-sm p-1.5 rounded-lg transition-colors shrink-0 opacity-80 sm:opacity-0 group-hover:opacity-100">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Footer Tools -->
+            <div class="mt-4 pt-3 border-t border-slate-200 flex justify-between items-center text-xs text-slate-400">
+                <button @click="resetToDefaultData" class="hover:text-rose-500 transition-colors flex items-center gap-1 font-medium">
+                    <i class="fa-solid fa-rotate-left"></i> 初期データ(200個)にリセット
+                </button>
+                <span class="font-medium">変更は自動保存されます</span>
+            </div>
+
+        </main>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        // Categories list
+        const CATEGORIES = [
+            { id: 'EMO', name: 'エモい・語り合い', icon: '💬', badgeClass: 'bg-indigo-50 text-indigo-600' },
+            { id: 'FOOD', name: 'ごはん・カフェ', icon: '🍽️', badgeClass: 'bg-amber-50 text-amber-600' },
+            { id: 'OUTING', name: 'おでかけ・街歩き', icon: '👟', badgeClass: 'bg-emerald-50 text-emerald-600' },
+            { id: 'CREATIVE', name: 'つくってみる', icon: '🎨', badgeClass: 'bg-pink-50 text-pink-600' },
+            { id: 'GAME', name: 'ゲーム・あそび', icon: '🎲', badgeClass: 'bg-purple-50 text-purple-600' },
+            { id: 'RELAX', name: 'リラックス・ご褒美', icon: '🌿', badgeClass: 'bg-teal-50 text-teal-600' },
+            { id: 'LIFE', name: '暮らし・片付け', icon: '🧹', badgeClass: 'bg-blue-50 text-blue-600' },
+            { id: 'SPECIAL', name: 'シュール・特別', icon: '✨', badgeClass: 'bg-rose-50 text-rose-600' },
+        ];
+
+        // 200 Initial Prompt Items
+        const DEFAULT_ITEMS = [
+            // 1. エモい・思い出・語り合い系
+            { id: 1, category: 'EMO', title: '若い頃好きだった曲を1曲だけ紹介しあって聴く', completed: false },
+            { id: 2, category: 'EMO', title: 'お互いの第一印象と今の印象を正直に言い合う', completed: false },
+            { id: 3, category: 'EMO', title: 'スマホのアルバムの一番古い写真を1枚見せ合う', completed: false },
+            { id: 4, category: 'EMO', title: '小さい頃の宝物や思い出の品について語る', completed: false },
+            { id: 5, category: 'EMO', title: '「人生の3大ニュース」を発表し合う', completed: false },
+            { id: 6, category: 'EMO', title: '初めて買ったCD（またはダウンロードした曲）を聴く', completed: false },
+            { id: 7, category: 'EMO', title: 'お互いの似合う色・服のテイストを選び合う', completed: false },
+            { id: 8, category: 'EMO', title: 'お互いの「ここが好き・感謝していること」を3つ伝える', completed: false },
+            { id: 9, category: 'EMO', title: '昔好きだったアニメやドラマの第1話を一緒に観る', completed: false },
+            { id: 10, category: 'EMO', title: '自分史上最高に美味しかった食べ物の話をする', completed: false },
+            { id: 11, category: 'EMO', title: '「もし宝くじで1億円当たったら」をリアルに計画する', completed: false },
+            { id: 12, category: 'EMO', title: '学生時代の黒歴史エピソードを披露し合う', completed: false },
+            { id: 13, category: 'EMO', title: 'お互いの手相を調べて占い合う', completed: false },
+            { id: 14, category: 'EMO', title: 'お互いの他薦プロフィール（紹介文）を書いてみる', completed: false },
+            { id: 15, category: 'EMO', title: '「自分の取説（取扱説明書）」を1つずつ発表する', completed: false },
+            { id: 16, category: 'EMO', title: 'お互いに「相手に似合う本」を1冊選んで贈る', completed: false },
+            { id: 17, category: 'EMO', title: '1年後の今日のお互いに向けた手紙を書く（タイムカプセル）', completed: false },
+            { id: 18, category: 'EMO', title: '懐かしの駄菓子を1人3個選んで思い出を語る', completed: false },
+            { id: 19, category: 'EMO', title: 'お互いの「死ぬまでにやりたいことリスト」を3つ共有する', completed: false },
+            { id: 20, category: 'EMO', title: '家族や地元のローカルルールを教え合う', completed: false },
+            { id: 21, category: 'EMO', title: '自分の人生の「主題歌（テーマソング）」を決めて聴く', completed: false },
+            { id: 22, category: 'EMO', title: 'お互いの幼少期の写真を見せ合う', completed: false },
+            { id: 23, category: 'EMO', title: '過去に行った中で一番綺麗だった景色の話をする', completed: false },
+            { id: 24, category: 'EMO', title: 'お気に入りの名言や大切にしている言葉を教え合う', completed: false },
+            { id: 25, category: 'EMO', title: 'お互いの名前の由来やあだ名の由来を話す', completed: false },
+
+            // 2. ごはん・カフェ・食の冒険系
+            { id: 26, category: 'FOOD', title: 'タコパする', completed: false },
+            { id: 27, category: 'FOOD', title: 'シークレットオーダーし合う（注文を相手におまかせ）', completed: false },
+            { id: 28, category: 'FOOD', title: 'SNSに出てきた前から作ってみたかった料理を作る', completed: false },
+            { id: 29, category: 'FOOD', title: '夜空の下でカップ麺を食べる', completed: false },
+            { id: 30, category: 'FOOD', title: 'みんな300円までおやつを買ってピクニックする', completed: false },
+            { id: 31, category: 'FOOD', title: 'コンビニの新作スイーツを1人1つ買ってシェアする', completed: false },
+            { id: 32, category: 'FOOD', title: '餃子を皮から手作りして包みまくる', completed: false },
+            { id: 33, category: 'FOOD', title: 'スーパーで一番高価なアイスを買って食べる', completed: false },
+            { id: 34, category: 'FOOD', title: '利き茶（緑茶・烏龍茶などの銘柄当て）をする', completed: false },
+            { id: 35, category: 'FOOD', title: '巨大なホットケーキやプリンを作ってみる', completed: false },
+            { id: 36, category: 'FOOD', title: '一度も入ったことがないファミレスやチェーン店に入る', completed: false },
+            { id: 37, category: 'FOOD', title: 'ピザを生地から作って好きなトッピングをのせる', completed: false },
+            { id: 38, category: 'FOOD', title: 'フルーツサンドを断面が映えるように手作りする', completed: false },
+            { id: 39, category: 'FOOD', title: 'お互いにイメージしたオリジナルカクテル（またはモクテル）を作る', completed: false },
+            { id: 40, category: 'FOOD', title: '缶詰だけで超豪華な居酒屋メニューを作ってみる', completed: false },
+            { id: 41, category: 'FOOD', title: '高級な食パンを買って色んなトーストアレンジを試す', completed: false },
+            { id: 42, category: 'FOOD', title: 'お互いのおすすめのお取り寄せグルメを1つ頼む', completed: false },
+            { id: 43, category: 'FOOD', title: '各自のおすすめレトルトカレーを持ち寄ってカレーパーティ', completed: false },
+            { id: 44, category: 'FOOD', title: '早朝に開いているお店でモーニングを食べる', completed: false },
+            { id: 45, category: 'FOOD', title: 'お店で一番人気のメニューではなく、あえて最下位（？）のメニューを頼む', completed: false },
+            { id: 46, category: 'FOOD', title: 'ポップコーンの味付けをオリジナルで5種類作ってみる', completed: false },
+            { id: 47, category: 'FOOD', title: '全員違う種類のカップ麺を買って少しずつシェアする', completed: false },
+            { id: 48, category: 'FOOD', title: '商店街で食べ歩きをして合計1000円以内におさめる', completed: false },
+            { id: 49, category: 'FOOD', title: '憧れのホテルのラウンジで紅茶を飲む', completed: false },
+            { id: 50, category: 'FOOD', title: 'パン屋さんで一番焼きたてのパンを1つずつ買って食べる', completed: false },
+            { id: 51, category: 'FOOD', title: '1つの食材（例：ナス・豆腐など）だけで3品作る', completed: false },
+            { id: 52, category: 'FOOD', title: 'お互いにアソートのドーナツから相手が好きそうなものを1つ選ぶ', completed: false },
+            { id: 53, category: 'FOOD', title: 'カルディや成城石井で見たことがない輸入菓子を買って食べる', completed: false },
+            { id: 54, category: 'FOOD', title: '自分で淹れたコーヒー・紅茶を持って公園でティータイム', completed: false },
+            { id: 55, category: 'FOOD', title: '居酒屋でメニューを見ずに「大将のおすすめ」を頼む', completed: false },
+
+            // 3. おでかけ・散歩・街歩き系
+            { id: 56, category: 'OUTING', title: 'レイトショーを観に行く', completed: false },
+            { id: 57, category: 'OUTING', title: 'みんなのおすすめデートスポットに行く', completed: false },
+            { id: 58, category: 'OUTING', title: 'メガネ屋に行ってお互いの似合う眼鏡を探す', completed: false },
+            { id: 59, category: 'OUTING', title: 'タピオカ片手に隣駅まで歩く', completed: false },
+            { id: 60, category: 'OUTING', title: 'サイコロを振って出た目の数だけバス停を進んで降りる', completed: false },
+            { id: 61, category: 'OUTING', title: '降りたことのない駅で降りて30分探検する', completed: false },
+            { id: 62, category: 'OUTING', title: '一番近い神社やお寺にお参りに行って、おみくじを引く', completed: false },
+            { id: 63, category: 'OUTING', title: '夜の公園でブランコに乗りながらゆっくり話す', completed: false },
+            { id: 64, category: 'OUTING', title: '地元の銭湯やスーパー銭湯に行って整う', completed: false },
+            { id: 65, category: 'OUTING', title: '最寄りの展望台や高い場所に行って夜景・景色を見る', completed: false },
+            { id: 66, category: 'OUTING', title: '大きな古本屋に行って1冊掘り出し物を探す', completed: false },
+            { id: 67, category: 'OUTING', title: 'ホームセンターに行って「これ欲しい」と思う便利グッズを探す', completed: false },
+            { id: 68, category: 'OUTING', title: '花屋さんでお互いっぽいお花を1本ずつ買って飾る', completed: false },
+            { id: 69, category: 'OUTING', title: '誰もいない早朝の街を30分だけ散歩する', completed: false },
+            { id: 70, category: 'OUTING', title: '電車の「一番端の車両」に乗って終点まで行ってみる', completed: false },
+            { id: 71, category: 'OUTING', title: '大きな文房具屋さんで一番書き心地の良いペンを探す', completed: false },
+            { id: 72, category: 'OUTING', title: '近くの道の駅や産直市場に行って珍しい野菜を買う', completed: false },
+            { id: 73, category: 'OUTING', title: '駄菓子屋さんに行って子どもの頃の気分で買いものする', completed: false },
+            { id: 74, category: 'OUTING', title: '水族館か動物園に行って一番推しの生き物を決める', completed: false },
+            { id: 75, category: 'OUTING', title: '街中のパブリックアートや珍しい看板を探して歩く', completed: false },
+            { id: 76, category: 'OUTING', title: '図書館に行って相手に読んでほしい本を1冊借りる', completed: false },
+            { id: 77, category: 'OUTING', title: '100円ショップで「これ便利！」と思ったものを1つ買い合う', completed: false },
+            { id: 78, category: 'OUTING', title: '地元で一番古い・歴史のあるカフェに入る', completed: false },
+            { id: 79, category: 'OUTING', title: '川沿いや海沿いをひたすらまっすぐ歩いてみる', completed: false },
+            { id: 80, category: 'OUTING', title: '街で見かけた可愛い猫や犬の写真を1枚撮る', completed: false },
+            { id: 81, category: 'OUTING', title: '大きな公園でレジャーシートを広げて寝転がる', completed: false },
+            { id: 82, category: 'OUTING', title: '楽器屋さんに行って音を鳴らしてみる', completed: false },
+            { id: 83, category: 'OUTING', title: '近くのアパレル店でお互いに全身コーディネートし合う', completed: false },
+            { id: 84, category: 'OUTING', title: '夜のドライブ（または夜風を浴びながらのウォーキング）をする', completed: false },
+            { id: 85, category: 'OUTING', title: '地元の観光案内所に行って、行ったことのないスポットを探す', completed: false },
+
+            // 4. クリエイティブ・作ってみる系
+            { id: 86, category: 'CREATIVE', title: 'インスタントカメラを買って全部撮り切る', completed: false },
+            { id: 87, category: 'CREATIVE', title: 'プラバンやレジンでオリジナルキーホルダーを作る', completed: false },
+            { id: 88, category: 'CREATIVE', title: 'お互いの似顔絵を1本描きで描いて見せ合う', completed: false },
+            { id: 89, category: 'CREATIVE', title: '今日撮った写真だけで小さなフォトブックを作る', completed: false },
+            { id: 90, category: 'CREATIVE', title: '100均の材料でインテリア雑貨を作ってみる', completed: false },
+            { id: 91, category: 'CREATIVE', title: '粘土で「相手の好きなもの」を作ってプレゼントする', completed: false },
+            { id: 92, category: 'CREATIVE', title: '粘土や絵の具でオリジナル箸置きを作る', completed: false },
+            { id: 93, category: 'CREATIVE', title: 'お互いにキャッチコピーをつけてポスター風のイラストを描く', completed: false },
+            { id: 94, category: 'CREATIVE', title: 'ショート動画を1本撮影して編集する', completed: false },
+            { id: 95, category: 'CREATIVE', title: '部屋の模様替え（家具の配置換え）を1箇所だけする', completed: false },
+            { id: 96, category: 'CREATIVE', title: '今日1日のテーマソングプレイリスト（5曲）を作る', completed: false },
+            { id: 97, category: 'CREATIVE', title: 'オリジナルのボードゲームやカードゲームを即興で作る', completed: false },
+            { id: 98, category: 'CREATIVE', title: '押し花を作って栞（しおり）にする', completed: false },
+            { id: 99, category: 'CREATIVE', title: 'お互いの手形を紙に取って記録に残す', completed: false },
+            { id: 100, category: 'CREATIVE', title: 'アロマキャンドルやバスボムを手作りする', completed: false },
+            { id: 101, category: 'CREATIVE', title: '4コマ漫画をお互いに1コマずつ交互に描いて完成させる', completed: false },
+            { id: 102, category: 'CREATIVE', title: '100均の無地Tシャツやトートバッグに絵を描く', completed: false },
+            { id: 103, category: 'CREATIVE', title: '今日撮った最高の写真でスマホの壁紙（ホーム画面）を作る', completed: false },
+            { id: 104, category: 'CREATIVE', title: 'お互いの声でオリジナルの目覚まし音声を録音する', completed: false },
+            { id: 105, category: 'CREATIVE', title: '部屋に小さな飾り付け（ガーランドなど）を飾ってみる', completed: false },
+            { id: 106, category: 'CREATIVE', title: 'プログラミングやAIツールを使って簡単な画像を生成する', completed: false },
+            { id: 107, category: 'CREATIVE', title: '相手のイメージに合わせた香水（アロマオイル）を調合する', completed: false },
+            { id: 108, category: 'CREATIVE', title: 'お互いの持ち物に小さなデコレーションをする', completed: false },
+            { id: 109, category: 'CREATIVE', title: '1日の思い出を動画にまとめてVlogを作る', completed: false },
+            { id: 110, category: 'CREATIVE', title: '「これから私たちは」の新しいお題カードを3つ考える', completed: false },
+
+            // 5. ゲーム・あそび・エンタメ系
+            { id: 111, category: 'GAME', title: '語彙力縛り人狼や「NGワードゲーム」をしながら過ごす', completed: false },
+            { id: 112, category: 'GAME', title: '昔懐かしいボードゲーム（人生ゲームやUNOなど）をやる', completed: false },
+            { id: 113, category: 'GAME', title: '相手にバレないように「小さなドッキリ」を1つ成功させる', completed: false },
+            { id: 114, category: 'GAME', title: 'スマホの対戦型ゲームで勝負して負けた方がジュースをおごる', completed: false },
+            { id: 115, category: 'GAME', title: 'おうちで本格的な謎解きゲーム（市販品やキット）をやる', completed: false },
+            { id: 116, category: 'GAME', title: 'カラオケに行って相手の世代のヒット曲を歌う', completed: false },
+            { id: 117, category: 'GAME', title: 'イントロドン（イントロ当てクイズ）を10問出し合う', completed: false },
+            { id: 118, category: 'GAME', title: 'アプリを使ってイントネーション・方言クイズをする', completed: false },
+            { id: 119, category: 'GAME', title: '10分間でどこまでルービックキューブやパズルが進むか挑む', completed: false },
+            { id: 120, category: 'GAME', title: '昔のレトロゲームをプレイする', completed: false },
+            { id: 121, category: 'GAME', title: '「英語禁止」で30分間会話する', completed: false },
+            { id: 122, category: 'GAME', title: 'お互いに指定した顔文字・変顔の真似をして写真を撮る', completed: false },
+            { id: 123, category: 'GAME', title: 'ガチャガチャ（カプセルトイ）を1回だけ回して交換する', completed: false },
+            { id: 124, category: 'GAME', title: 'クレーンゲームで1つだけ景品を狙って勝負する', completed: false },
+            { id: 125, category: 'GAME', title: '1分間お互い目を見つめ合って笑ったら負けゲーム', completed: false },
+            { id: 126, category: 'GAME', title: '相手のマイナーな癖やあるあるを当てるクイズをする', completed: false },
+            { id: 127, category: 'GAME', title: '全員で「古今東西ゲーム（山手線ゲーム）」で大盛り上がりする', completed: false },
+            { id: 128, category: 'GAME', title: 'トランプで神経衰弱をして勝った人がお願い事を1つ言える', completed: false },
+            { id: 129, category: 'GAME', title: 'YouTubeで「再生回数100回以下」の面白い動画を探す', completed: false },
+            { id: 130, category: 'GAME', title: '誰にも見せない「秘密のポーズ」を全員で決めて写真を撮る', completed: false },
+            { id: 131, category: 'GAME', title: '「実は私〇〇なんです」という嘘か本当か当てるゲーム', completed: false },
+            { id: 132, category: 'GAME', title: 'アニメの名台詞だけで5分間会話してみる', completed: false },
+            { id: 133, category: 'GAME', title: '連想ゲームで10回連続で同じ言葉を出せるか挑戦する', completed: false },
+            { id: 134, category: 'GAME', title: 'スイッチやPS5のパーティゲームで本気勝負する', completed: false },
+            { id: 135, category: 'GAME', title: 'ボウリングやバッティングセンターで体を動かす', completed: false },
+
+            // 6. リラックス・ご褒美・セルフケア系
+            { id: 136, category: 'RELAX', title: 'ちょっと高めの入浴剤を入れて長風呂する', completed: false },
+            { id: 137, category: 'RELAX', title: 'フェイスパックをしながら温かいお茶を飲む', completed: false },
+            { id: 138, category: 'RELAX', title: 'お互いに肩や足を5分ずつマッサージし合う', completed: false },
+            { id: 139, category: 'RELAX', title: 'アロマオイルを焚いて部屋を暗くし、ヒーリング音楽を聴く', completed: false },
+            { id: 140, category: 'RELAX', title: '高級な歯磨き粉やオーラルケアグッズを使ってみる', completed: false },
+            { id: 141, category: 'RELAX', title: 'スマホの通知を2時間オフにしてデジタルデトックスする', completed: false },
+            { id: 142, category: 'RELAX', title: 'お気に入りのホットドリンクを入れて読書タイムを作る', completed: false },
+            { id: 143, category: 'RELAX', title: '部屋の換気をしっかりして、お香やルームスプレーを焚く', completed: false },
+            { id: 144, category: 'RELAX', title: 'ふわふわの靴下やルームウェアを着てゴロゴロする', completed: false },
+            { id: 145, category: 'RELAX', title: '一番好きなお笑い芸人のネタ動画を見て爆笑する', completed: false },
+            { id: 146, category: 'RELAX', title: '太陽の光を浴びながら10分間だけ日光浴する', completed: false },
+            { id: 147, category: 'RELAX', title: 'ふかふかの布団を干して、夜気持ちよく寝る準備をする', completed: false },
+            { id: 148, category: 'RELAX', title: '体をゆっくりほぐすストレッチやヨガを15分やる', completed: false },
+            { id: 149, category: 'RELAX', title: '美容院やネイルサロンに行って自分磨きをする', completed: false },
+            { id: 150, category: 'RELAX', title: '一番リラックスできる「焚き火」や「雨の音」の動画を流す', completed: false },
+            { id: 151, category: 'RELAX', title: 'お気に入りのマグカップでおいしい白湯（さゆ）を飲む', completed: false },
+            { id: 152, category: 'RELAX', title: '自分の身体を労わるヘルシーなスープを作る', completed: false },
+            { id: 153, category: 'RELAX', title: 'アイマスクをして15分だけ本気のお昼寝をする', completed: false },
+            { id: 154, category: 'RELAX', title: 'おうちで足湯（バケツにお湯を張って）をしながら話す', completed: false },
+            { id: 155, category: 'RELAX', title: '頭皮マッサージ（ヘッドスパごっこ）をし合う', completed: false },
+            { id: 156, category: 'RELAX', title: '部屋のクッションや枕を全部集めて最高のフカフカ基地を作る', completed: false },
+            { id: 157, category: 'RELAX', title: '今日の終わりに「今日よかったこと」を3つ呟いて寝る', completed: false },
+            { id: 158, category: 'RELAX', title: '1人1缶、クラフトビールや特別なジュースで乾杯する', completed: false },
+            { id: 159, category: 'RELAX', title: '静かなクラシックやジャズを流しながらボーッとする', completed: false },
+            { id: 160, category: 'RELAX', title: 'お風呂上がりに贅沢なアイス（ハーゲンダッツなど）を食べる', completed: false },
+
+            // 7. 暮らし・片付け・小さなチャレンジ系
+            { id: 161, category: 'LIFE', title: 'スマホの不要な写真や動画を50枚削除する', completed: false },
+            { id: 162, category: 'LIFE', title: '財布の中の使っていないカードやレシートを全部捨てる', completed: false },
+            { id: 163, category: 'LIFE', title: '冷蔵庫の中身を全部出して賞味期限チェック＆掃除をする', completed: false },
+            { id: 164, category: 'LIFE', title: '靴を1足ピカピカに磨く', completed: false },
+            { id: 165, category: 'LIFE', title: '観葉植物や部屋のお花にお水をあげて葉っぱを拭く', completed: false },
+            { id: 166, category: 'LIFE', title: 'スマホのホーム画面のアプリ配置を使いやすく変える', completed: false },
+            { id: 167, category: 'LIFE', title: '1つだけ使っていない服やモノをメルカリに出品・処分する', completed: false },
+            { id: 168, category: 'LIFE', title: '今週の作り置きおかずを1品だけ作っておく', completed: false },
+            { id: 169, category: 'LIFE', title: '鏡や窓ガラスをピカピカに拭き上げる', completed: false },
+            { id: 170, category: 'LIFE', title: '普段使わない調味料を使ってレシピを開拓する', completed: false },
+            { id: 171, category: 'LIFE', title: 'ずっと後回しにしていた手続きや連絡を1つ終わらせる', completed: false },
+            { id: 172, category: 'LIFE', title: '家の中の「1箇所だけ」を徹底的に断捨離・清掃する', completed: false },
+            { id: 173, category: 'LIFE', title: '自分の「防災グッズ」の中身をチェックする', completed: false },
+            { id: 174, category: 'LIFE', title: '部屋のカーテンを洗う、または綺麗にたたむ', completed: false },
+            { id: 175, category: 'LIFE', title: 'パソコンのデスクトップにある不要なファイルを整理する', completed: false },
+            { id: 176, category: 'LIFE', title: '今月使ったお金を振り返って簡単なお小遣い帳をつける', completed: false },
+            { id: 177, category: 'LIFE', title: '明日の服のコーディネートを前日のうちに決めておく', completed: false },
+            { id: 178, category: 'LIFE', title: '玄関の靴を全部しまって、たたきを水拭きする', completed: false },
+            { id: 179, category: 'LIFE', title: '使っていないアプリを5つアンインストールする', completed: false },
+            { id: 180, category: 'LIFE', title: 'ベッドカバーやシーツを新しいものに取り替える', completed: false },
+
+            // 8. ちょっと奇妙・シュール・特別系
+            { id: 181, category: 'SPECIAL', title: '「架空のラジオ番組」になりきってトークを録音する', completed: false },
+            { id: 182, category: 'SPECIAL', title: '部屋の電気を消して懐中電灯だけで15分過ごす', completed: false },
+            { id: 183, category: 'SPECIAL', title: '相手の今日の服装に「かっこいいファッション名」をつける', completed: false },
+            { id: 184, category: 'SPECIAL', title: 'お互いに相手の「専用のポスター」を紙とペンで作る', completed: false },
+            { id: 185, category: 'SPECIAL', title: 'ドラマのワンシーンになりきって茶番劇を演じる', completed: false },
+            { id: 186, category: 'SPECIAL', title: '語尾に「〜ござる」や「〜にゃ」をつけて15分会話する', completed: false },
+            { id: 187, category: 'SPECIAL', title: '誰も見ていないところで全力の「決めポーズ」をする', completed: false },
+            { id: 188, category: 'SPECIAL', title: '部屋の中で宝探し（小さな紙を隠して探す）をする', completed: false },
+            { id: 189, category: 'SPECIAL', title: '宇宙人や未来人になりきって地球の文化について語る', completed: false },
+            { id: 190, category: 'SPECIAL', title: 'お互いに「架空の必殺技」を考えてポーズ付きで披露する', completed: false },
+            { id: 191, category: 'SPECIAL', title: '利き手と反対の手だけで手紙や絵を描いてみる', completed: false },
+            { id: 192, category: 'SPECIAL', title: 'アイドルグループのライブ映像を見てコールを覚えてみる', completed: false },
+            { id: 193, category: 'SPECIAL', title: '今日1日限定の「2人だけの秘密の言葉（暗号）」を決める', completed: false },
+            { id: 194, category: 'SPECIAL', title: '10分間、言葉を使わずジェスチャーだけで会話する', completed: false },
+            { id: 195, category: 'SPECIAL', title: 'お互いをテーマにした「短い詩」を作って朗読する', completed: false },
+            { id: 196, category: 'SPECIAL', title: '目隠しをして食べたものを当てる「目隠し味覚クイズ」', completed: false },
+            { id: 197, category: 'SPECIAL', title: '自分の持ち物に「名前」をつけて愛着を湧かせる', completed: false },
+            { id: 198, category: 'SPECIAL', title: '次に行く旅行の計画（架空でもOK）を本気で旅スケジュール化する', completed: false },
+            { id: 199, category: 'SPECIAL', title: '今日の体験をニュース番組のキャスター風にリポートする', completed: false },
+            { id: 200, category: 'SPECIAL', title: '「これからもよろしく」と握手をして記念撮影する', completed: false }
+        ];
+
+        const STORAGE_KEY = 'korekara_watashitachi_data_v1';
+
+        createApp({
+            setup() {
+                const currentTab = ref('draw'); // 'draw' | 'list'
+                const items = ref([]);
+                const categories = ref(CATEGORIES);
+                
+                // Draw State
+                const selectedCategory = ref('ALL'); // 'ALL' | 'ONLY_UNCOMPLETED' | Category ID
+                const isFlipped = ref(false);
+                const currentCard = ref(null);
+
+                // List State
+                const listCategoryFilter = ref('ALL');
+                const statusFilter = ref('ALL'); // 'ALL' | 'COMPLETED' | 'UNCOMPLETED'
+                const searchQuery = ref('');
+                const newItemTitle = ref('');
+                const newItemCategory = ref('EMO');
+
+                // Load Data from LocalStorage or default
+                const loadData = () => {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    if (saved) {
+                        try {
+                            items.value = JSON.parse(saved);
+                        } catch (e) {
+                            console.error('Failed to parse storage data', e);
+                            items.value = [...DEFAULT_ITEMS];
+                        }
+                    } else {
+                        items.value = [...DEFAULT_ITEMS];
+                    }
+                };
+
+                // Watch & Auto-save
+                watch(items, (newVal) => {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(newVal));
+                }, { deep: true });
+
+                // Computed
+                const completedCount = computed(() => {
+                    return items.value.filter(item => item.completed).length;
+                });
+
+                const completionPercentage = computed(() => {
+                    if (items.value.length === 0) return 0;
+                    return Math.round((completedCount.value / items.value.length) * 100);
+                });
+
+                const uncompletedItems = computed(() => {
+                    return items.value.filter(item => !item.completed);
+                });
+
+                const filteredItems = computed(() => {
+                    return items.value.filter(item => {
+                        // Category filter
+                        if (listCategoryFilter.value !== 'ALL' && item.category !== listCategoryFilter.value) {
+                            return false;
+                        }
+                        // Status filter
+                        if (statusFilter.value === 'COMPLETED' && !item.completed) return false;
+                        if (statusFilter.value === 'UNCOMPLETED' && item.completed) return false;
+                        
+                        // Search query
+                        if (searchQuery.value.trim() !== '') {
+                            const query = searchQuery.value.toLowerCase();
+                            return item.title.toLowerCase().includes(query);
+                        }
+
+                        return true;
+                    });
+                });
+
+                // Methods
+                const drawCard = () => {
+                    let candidates = [...items.value];
+
+                    if (selectedCategory.value === 'ONLY_UNCOMPLETED') {
+                        candidates = candidates.filter(item => !item.completed);
+                    } else if (selectedCategory.value !== 'ALL') {
+                        candidates = candidates.filter(item => item.category === selectedCategory.value);
+                    }
+
+                    if (candidates.length === 0) {
+                        alert('条件に一致するお題カードがありません。フィルターを変更してください。');
+                        return;
+                    }
+
+                    // Flip back first if currently flipped
+                    if (isFlipped.value) {
+                        isFlipped.value = false;
+                        setTimeout(() => {
+                            pickRandomCard(candidates);
+                            isFlipped.value = true;
+                        }, 300);
+                    } else {
+                        pickRandomCard(candidates);
+                        isFlipped.value = true;
+                    }
+                };
+
+                const pickRandomCard = (candidatesList) => {
+                    const randomIndex = Math.floor(Math.random() * candidatesList.length);
+                    currentCard.value = candidatesList[randomIndex];
+                };
+
+                const handleCardClick = () => {
+                    if (!isFlipped.value) {
+                        drawCard();
+                    } else {
+                        // Flip to pick next
+                        drawCard();
+                    }
+                };
+
+                const toggleItemComplete = (itemToToggle) => {
+                    if (!itemToToggle) return;
+                    const target = items.value.find(i => i.id === itemToToggle.id);
+                    if (target) {
+                        target.completed = !target.completed;
+                    }
+                };
+
+                const addNewItem = () => {
+                    if (!newItemTitle.value.trim()) return;
+                    
+                    const newId = items.value.length > 0 ? Math.max(...items.value.map(i => i.id)) + 1 : 1;
+                    items.value.unshift({
+                        id: newId,
+                        category: newItemCategory.value,
+                        title: newItemTitle.value.trim(),
+                        completed: false
+                    });
+
+                    newItemTitle.value = '';
+                };
+
+                const deleteItem = (id) => {
+                    if (confirm('このお題を削除してもよろしいですか？')) {
+                        items.value = items.value.filter(i => i.id !== id);
+                        if (currentCard.value && currentCard.value.id === id) {
+                            currentCard.value = null;
+                            isFlipped.value = false;
+                        }
+                    }
+                };
+
+                const resetToDefaultData = () => {
+                    if (confirm('全てのデータを最初のおすすめ200項目にリセットしますか？（追加・実施状況は消去されます）')) {
+                        items.value = JSON.parse(JSON.stringify(DEFAULT_ITEMS));
+                        currentCard.value = null;
+                        isFlipped.value = false;
+                    }
+                };
+
+                // Helpers
+                const getCategoryName = (catId) => {
+                    const cat = CATEGORIES.find(c => c.id === catId);
+                    return cat ? cat.name : 'その他';
+                };
+
+                const getCategoryIcon = (catId) => {
+                    const cat = CATEGORIES.find(c => c.id === catId);
+                    return cat ? cat.icon : '✨';
+                };
+
+                const getCategoryBadgeClass = (catId) => {
+                    const cat = CATEGORIES.find(c => c.id === catId);
+                    return cat ? cat.badgeClass : 'bg-slate-100 text-slate-600';
+                };
+
+                const getCategoryItems = (catId) => {
+                    return items.value.filter(i => i.category === catId);
+                };
+
+                onMounted(() => {
+                    loadData();
+                });
+
+                return {
+                    currentTab,
+                    items,
+                    categories,
+                    selectedCategory,
+                    isFlipped,
+                    currentCard,
+                    listCategoryFilter,
+                    statusFilter,
+                    searchQuery,
+                    newItemTitle,
+                    newItemCategory,
+                    completedCount,
+                    completionPercentage,
+                    uncompletedItems,
+                    filteredItems,
+                    drawCard,
+                    handleCardClick,
+                    toggleItemComplete,
+                    addNewItem,
+                    deleteItem,
+                    resetToDefaultData,
+                    getCategoryName,
+                    getCategoryIcon,
+                    getCategoryBadgeClass,
+                    getCategoryItems
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
